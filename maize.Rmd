@@ -1,0 +1,638 @@
+---
+title: "FOOD DATA ANALYSIS WITH A FOCUS ON MAIZE"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Data was obtained from FAOSTAT website.
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(ggrepel)
+library(patchwork)
+library(janitor)
+library(VIM)
+library(scales)
+```
+
+#### load the data and clean the names, select useful columns
+```{r}
+food <- read_csv("crops_livestock.csv")
+food <- food %>% clean_names()
+```
+
+### data dimensions
+```{r}
+dim(food) ### dimensions
+```
+
+### data head
+```{r}
+head(food)
+```
+
+### slect element, item, year, unit, value and flag_description as columns
+```{r}
+food_data <- food %>% select(
+  element, item, year, unit, value,
+  flag_description
+)
+```
+
+### dimesnion, head and tail of the new working data
+```{r}
+dim(food_data)
+head(food_data)
+tail(food_data)
+```
+
+### missing values
+```{r}
+aggr(food_data)
+knitr::kable(sum(is.na(food_data)), caption = "MISSING VALUES", digits = 2, format.args = list(big.mark = ",", scientific = FALSE)) %>% kableExtra::kable_styling(latex_options = "HOLD_position")
+```
+
+### There are 24 missing entries which are found in the value column.
+
+```{r}
+head(food_data %>% filter(is.na(value)))
+```
+
+### Where we have missing values the flag_description is "Missing value"
+
+### remove the missing values
+```{r}
+food_data <- food_data %>% 
+  filter(!str_detect(flag_description, 
+                     regex("Missing value", ignore_case = T)))
+```
+
+#### rename year to focus_year
+```{r}
+food_data <- rename(food_data, focus_year = year)
+glimpse(food_data)
+```
+
+### Count the elements
+```{r}
+knitr::kable(food_data %>% count(element),
+  caption = "NO OF ELEMENTS",
+  longtable = TRUE, digits = 2,
+  format.args = list(
+    big.mark = ",",
+    scientific = FALSE
+  ),
+  "latex"
+) %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(
+    latex_options = "HOLD_position", "repeat_header"
+  )
+```
+
+### count of item
+```{r}
+knitr::kable(food_data %>% count(item), caption = "NO OF ITEMS", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+### count focus_year
+```{r}
+knitr::kable(food_data %>% count(focus_year), caption = "YEARS", longtable = TRUE, "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+### count unit
+```{r}
+knitr::kable(food_data %>% count(unit), caption = "YEARS", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+### count flag_description
+```{r}
+knitr::kable(food_data %>% count(flag_description), caption = "NO OF FLAG DESCRIPTION", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+### The range of value column
+```{r}
+range(food_data$value)
+```
+
+### The column had a minimum entry of 0 and a maximum entry of 36,021,177. A value of 0 is not useful in this analysis, therefore they will be removed
+
+### remove the entries with 0 values
+```{r}
+(food_data_zero_value <- food_data %>% filter(value == 0))
+food_data <- food_data %>% filter(value > 0)
+```
+
+### we count the elements after removing the 0s
+```{r}
+knitr::kable(food_data %>% count(element), caption = "NO OF ELEMENTS", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+### work with food crops
+### start with crops, which implies that for the element we will need the Area harvested, Production and Yield.
+### Thus we filter for the 3 elements
+```{r}
+food_data_crops <- food_data %>% filter(str_detect(element, regex("Production|harvested|Yield", ignore_case = F)))
+food_data_crops <- food_data_crops %>% filter(!str_detect(element, regex("Carcass", ignore_case = F)))
+```
+
+### Count the elements after filtering
+```{r}
+knitr::kable(food_data_crops %>% count(element), caption = "NO OF ELEMENTS", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+## 1. THE ELEMENTS
+
+### top items by production
+```{r}
+knitr::kable(food_data_crops %>% filter(element == "Production") %>% group_by(item) %>% filter(value == max(value)) %>% select(item, focus_year, unit, value) %>% arrange(desc(value)) %>% head(50), caption = "YEARLY TOP ITEMS PER PRODUCTION", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(4, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+```{r}
+food_data_top_pro <- food_data_crops %>%
+  filter(element == "Production") %>%
+  group_by(item) %>%
+  summarise(average = mean(value)) %>%
+  arrange(desc(average)) %>%
+  head(25)
+ggplot(food_data_top_pro, aes(reorder(x = item, -average),
+  y = average,
+  fill = item
+)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Product", y = "Average Production in tonnes", title = "Most Produced") +
+  theme(axis.text.x = element_text(angle = -90)) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = label_number(suffix = " M", scale = 1e-6)) +
+  coord_flip()
+```
+
+### Area Harvested
+```{r}
+knitr::kable(food_data_crops %>% filter(element == "Area harvested") %>% group_by(item) %>% filter(value == max(value)) %>% select(item, focus_year, unit, value) %>% arrange(desc(value)) %>% head(50), caption = "YEARLY TOP ITEMS PER AREA HARVESTED", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(4, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+```{r}
+food_data_top_area <- food_data_crops %>%
+  filter(element == "Area harvested") %>%
+  group_by(item) %>%
+  summarise(average = mean(value)) %>%
+  arrange(desc(average)) %>%
+  head(25)
+ggplot(food_data_top_area, aes(reorder(x = item, -average),
+  y = average,
+  fill = item
+)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    x = "Product", y = "Average Area harvested ha",
+    title = "Most Harvested"
+  ) +
+  theme(axis.text.x = element_text(angle = -90)) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = label_number(suffix = " M", scale = 1e-6)) +
+  coord_flip()
+```
+
+### items by Yield
+```{r}
+knitr::kable(food_data_crops %>% filter(element == "Yield") %>% group_by(item) %>% filter(value == max(value)) %>% select(item, focus_year, unit, value) %>% arrange(desc(value)) %>% head(50), caption = "YEARLY TOP YIELDS", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(4, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+### Yied
+```{r}
+food_data_top_yield <- food_data_crops %>%
+  filter(element == "Yield") %>%
+  group_by(item) %>%
+  summarise(average = mean(value)) %>%
+  arrange(desc(average)) %>%
+  head(25)
+ggplot(food_data_top_yield, aes(reorder(x = item, -average), y = average, fill = item)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Year", y = "Amount in HG/HA", title = "Average Yield") +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = label_number(suffix = " K", scale = 1e-5)) +
+  coord_flip()
+```
+
+### select items that are found in a regular food market
+```{r}
+food_data_crops_1 <- food_data_crops %>% filter(str_detect(item, regex("avocado|banana|beans|cabbage|carrot|cassava|cow peas|maize|millet|potatoes|rice|sorghum|spinach|tomato|wheat|onion", ignore_case = T))) ### select the data for items in the regex
+food_data_crops_1 <- food_data_crops_1 %>% filter(!str_detect(item, regex("soya|other beans|broad|oil|paddy", ignore_case = T))) ### exclude the items in the regex
+food_data_crops_1 <- food_data_crops_1 %>%
+  mutate(item = case_when(
+    str_detect(item, "Beans, dry") ~ "Beans_Dry",
+    str_detect(item, "Cassava") ~ "Fresh Cassava",
+    str_detect(item, "Cow peas") ~ "Dry Cow peas",
+    str_detect(item, "corn") ~ "Maize corn",
+    str_detect(item, "Onions") ~ "Onions",
+    str_detect(item, "cooking bananas") ~ "Plantains bananas",
+    str_detect(item, "paddy") ~ "Paddy Rice",
+    TRUE ~ item
+  )) ### Change some row entries for the items
+```
+
+### since Yield was recorded as hg/ha we can divide it by 10,000 to get at tonnes/ha for it to be in uniform with production
+```{r}
+food_data_crops_1 <- mutate(food_data_crops_1, value = ifelse(element == "Yield", value / 10000, value))
+```
+
+```{r}
+knitr::kable(food_data_crops_1 %>% count(element), caption = "NO OF ELEMENTS", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+```{r}
+knitr::kable(food_data_crops_1 %>% count(item), caption = "NO OF ITEMS", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+```{r}
+knitr::kable(food_data_crops_1 %>% count(focus_year), caption = "YEARS", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+```{r}
+knitr::kable(food_data_crops_1 %>% count(unit), caption = "UNITS", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+```{r}
+knitr::kable(food_data_crops_1 %>% count(flag_description), caption = "FLAGS", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+```{r}
+knitr::kable(food_data_crops_1 %>% group_by(element) %>% count(unit), caption = "UNITS PER ELEMENT", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(3, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+### Focus year as a factor
+```{r}
+food_data_crops_1$focus_year <- as.factor(food_data_crops_1$focus_year)
+```
+
+### A look at the top items from each element we get almost the same products as the ones selected as from a regular market although appearing in different order. Thus the selected food crops were in tandem with the results.
+
+```{r}
+food_data_crops_top <- food_data_crops_1 %>%
+  filter(element == "Production") %>%
+  group_by(item) %>%
+  summarise(average = mean(value)) %>%
+  arrange(desc(average))
+ggplot(food_data_crops_top, aes(reorder(x = item, -average),
+  y = average,
+  fill = item
+)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Product", y = "Average Production in tonnes", title = "Most Produced") +
+  theme(axis.text.x = element_text(angle = -90)) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = label_number(suffix = " M", scale = 1e-6))
+```
+
+```{r}
+food_data_crops_top_plant <- food_data_crops_1 %>%
+  filter(element == "Area harvested") %>%
+  group_by(item) %>%
+  summarise(average = mean(value)) %>%
+  arrange(desc(average))
+ggplot(food_data_crops_top_plant, aes(reorder(x = item, -average),
+  y = average,
+  fill = item
+)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Product", y = "Average Harvested in Ha", title = "Most Planted") +
+  theme(axis.text.x = element_text(angle = -90)) +
+  theme(legend.position = "none") +
+  scale_y_continuous(labels = label_number(suffix = " M", scale = 1e-6))
+```
+
+```{r}
+food_data_crops_top_yield <- food_data_crops_1 %>%
+  filter(element == "Yield") %>%
+  group_by(item) %>%
+  summarise(average = mean(value)) %>%
+  arrange(desc(average))
+ggplot(food_data_crops_top_yield, aes(reorder(x = item, -average),
+  y = average,
+  fill = item
+)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Product", y = "Average Yield in tonnes/ha", title = "Most Yield") +
+  theme(axis.text.x = element_text(angle = -90)) +
+  theme(legend.position = "none") +
+  scale_y_continuous(breaks = seq(0, 40, by = 5))
+```
+
+```{r}
+food_data_crops_top_tots <- food_data_crops_1 %>%
+  group_by(item, element) %>%
+  summarise(average = mean(value))
+food_data_crops_top_tots_1 <- food_data_crops_top_tots %>% filter(!str_detect(element, regex("Yield", ignore_case = T)))
+ggplot(food_data_crops_top_tots_1, aes(reorder(x = item, -average),
+  y = average,
+  fill = element
+)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = -90)) +
+  scale_y_continuous(breaks = seq(0, 4400000, by = 200000)) +
+  labs(x = "Product", y = "Average", title = "Production and Area Harvested")
+```
+
+### Maize and dry beans did not do well as per the area harvested and production.
+### Sorghum, Cow Peas and Millet were the only products that Area harvested was more than production. This implies the three products take more space as compared to what they give.
+### The other products were fairly doing well as we compare the area harvested and production.
+
+
+3 THE ELEMENTS PER YEAR
+### reshape the data to have item, focus_year, area_harvested, yield and production as the column heads
+```{r}
+food_data_crops_2 <- food_data_crops_1 %>% select(element, item, focus_year, value)
+food_data_crops_2 <- food_data_crops_2 %>%
+  pivot_longer(-c(element, item, focus_year)) %>%
+  pivot_wider(names_from = element, values_from = value)
+str(food_data_crops_2)
+food_data_crops_2 <- food_data_crops_2 %>% clean_names()
+food_data_crops_2 <- food_data_crops_2 %>% select(-name)
+head(food_data_crops_2)
+```
+
+### 3.2 Area Harvested and Production
+```{r}
+food_data_crops_2_year1 <- food_data_crops_2 %>% filter(focus_year == "2015")
+ggplot(food_data_crops_2_year1) +
+  geom_point(aes(area_harvested, production, colour = item, shape = item), size = 2.5) +
+  labs(x = "Area Harvested (ha)", y = "Production(tonnes)", title = "Area Harvested Agaisnt Production in 2015") +
+  scale_shape_manual(values = 1:18) +
+  scale_y_continuous(breaks = seq(0, 5000000, by = 500000))
+```
+
+```{r}
+food_data_crops_2_year2 <- food_data_crops_2 %>% filter(focus_year == "2016")
+ggplot(food_data_crops_2_year2) +
+  geom_point(aes(area_harvested, production, colour = item, shape = item), size = 2.5) +
+  labs(x = "Area Harvested (ha)", y = "Production(tonnes)", title = "Area Harvested Agaisnt Production in 2016") +
+  scale_shape_manual(values = 1:18) +
+  scale_y_continuous(breaks = seq(0, 5000000, by = 500000))
+```
+
+```{r}
+food_data_crops_2_year3 <- food_data_crops_2 %>% filter(focus_year == "2017")
+ggplot(food_data_crops_2_year3) +
+  geom_point(aes(area_harvested, production, colour = item, shape = item), size = 2.5) +
+  labs(x = "Area Harvested (ha)", y = "Production(tonnes)", title = "Area Harvested Agaisnt Production in 2017") +
+  scale_shape_manual(values = 1:18) +
+  scale_y_continuous(breaks = seq(0, 5000000, by = 500000))
+```
+
+```{r}
+food_data_crops_2_year4 <- food_data_crops_2 %>% filter(focus_year == "2018")
+ggplot(food_data_crops_2_year4) +
+  geom_point(aes(area_harvested, production, colour = item, shape = item), size = 2.5) +
+  labs(x = "Area Harvested (ha)", y = "Production(tonnes)", title = "Area Harvested Agaisnt Production in 2018") +
+  scale_shape_manual(values = 1:18) +
+  scale_y_continuous(breaks = seq(0, 5000000, by = 500000))
+```
+
+```{r}
+food_data_crops_2_year5 <- food_data_crops_2 %>% filter(focus_year == "2019")
+ggplot(food_data_crops_2_year5) +
+  geom_point(aes(area_harvested, production, colour = item, shape = item), size = 2.5) +
+  labs(x = "Area Harvested (ha)", y = "Production(tonnes)", title = "Area Harvested Agaisnt Production in 2019") +
+  scale_shape_manual(values = 1:18) +
+  scale_y_continuous(breaks = seq(0, 5000000, by = 500000))
+```
+
+```{r}
+food_data_crops_2_year6 <- food_data_crops_2 %>% filter(focus_year == "2020")
+ggplot(food_data_crops_2_year6) +
+  geom_point(aes(area_harvested, production, colour = item, shape = item), size = 2.5) +
+  labs(x = "Area Harvested (ha)", y = "Production(tonnes)", title = "Area Harvested Agaisnt Production in 2020") +
+  scale_shape_manual(values = 1:18) +
+  scale_y_continuous(breaks = seq(0, 5000000, by = 500000))
+```
+
+### From the point plots maize is by far the most planted crop in Kenya going by the area harvested. IT is also the most produced crop in Kenya.
+### By area harvested maize is followed by dry beans. Going by the area harvested beans has very low production.
+### Potatoes and bananas are produced more with less area harvested.
+
+```{r}
+knitr::kable(food_data_crops_1 %>% group_by(element, item) %>% summarise(average = mean(value)) %>% arrange(item), caption = "AVERAGE PRODUCTION,AREA AND YIELD PER PRODUCT", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(3, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+### if we arrange with the average yield then we get that maize had very low yield
+```{r}
+knitr::kable(food_data_crops_1 %>% group_by(element, item) %>% summarise(average = mean(value)) %>% arrange(average), caption = "AVERAGE PRODUCTION,AREA AND YIELD PER PRODUCT", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(3, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+## 4 MAIZE
+### 4.1 average value per element
+```{r}
+food_data_crops_maize <- food_data_crops_1 %>% filter(item == "Maize corn")
+knitr::kable(food_data_crops_maize %>% group_by(element) %>% summarise(average = mean(value)), caption = "AVERAGE PRODUCTION,AREA AND YIELD FOR MAIZE", longtable = TRUE, digits = 2, format.args = list(big.mark = ",", scientific = FALSE), "latex") %>%
+  kableExtra::column_spec(1, border_left = T) %>%
+  kableExtra::column_spec(2, border_right = T) %>%
+  kableExtra::kable_styling(latex_options = "HOLD_position", "repeat_header")
+```
+
+```{r}
+food_data_crops_maize_ave <- food_data_crops_maize %>%
+  group_by(element) %>%
+  summarise(average = mean(value))
+ggplot(food_data_crops_maize_ave, aes(reorder(x = element, -average),
+  y = average
+)) +
+  geom_bar(stat = "identity", position = "dodge", fill = "darkgreen") +
+  labs(x = "Year", y = "Amverage Value", title = "Average Per Element") +
+  scale_y_continuous(breaks = seq(0, 4400000, by = 200000))
+```
+
+### 4.2 Area Harvested
+```{r}
+p1 <- food_data_crops_maize %>%
+  filter(element == "Area harvested") %>%
+  ggplot(aes(focus_year, value)) +
+  geom_bar(stat = "identity", position = "dodge", fill = "darkgreen") +
+  labs(x = "Year", y = "Amount in Ha", title = "Area Harvested") +
+  theme(axis.text.x = element_text(angle = -90)) +
+  scale_y_continuous(
+    breaks = seq(0, 4200000, by = 200000),
+    limits = c(0, 4200000)
+  )
+p1
+```
+
+```{r}
+food_data_crops_2 %>%
+  filter(item == "Maize corn") %>%
+  ggplot(aes(focus_year, area_harvested, group = 1)) +
+  geom_point() +
+  geom_line(colour = "darkgreen") +
+  labs(x = "Year", y = "Area in ha", title = "Area harvested per year")
+```
+
+### 4.3 Production
+```{r}
+p2 <- food_data_crops_maize %>%
+  filter(element == "Production") %>%
+  ggplot(aes(focus_year, value)) +
+  geom_bar(stat = "identity", position = "dodge", fill = "darkgreen") +
+  labs(x = "Year", y = "Amount in tonnes", title = "Yearly Production") +
+  theme(axis.text.x = element_text(angle = -90)) +
+  scale_y_continuous(
+    breaks = seq(0, 4200000, by = 200000),
+    limits = c(0, 4200000)
+  )
+p2
+```
+
+```{r}
+food_data_crops_2 %>%
+  filter(item == "Maize corn") %>%
+  ggplot(aes(focus_year, production, group = 1)) +
+  geom_point() +
+  geom_line(colour = "darkgreen") +
+  labs(x = "Year", y = "Amount in tonnes", title = "Production Per \n Year")
+```
+
+### 4.4 Yield
+```{r}
+p3 <- food_data_crops_maize %>%
+  filter(element == "Yield") %>%
+  ggplot(aes(focus_year, value)) +
+  geom_bar(stat = "identity", position = "dodge", fill = "darkgreen") +
+  labs(x = "Year", y = "Amount in tonnes/ha", title = "Yield Per Year") +
+  theme(axis.text.x = element_text(angle = -90)) +
+  scale_y_continuous(breaks = seq(0, 2, by = 0.2))
+p3
+```
+
+```{r}
+p1 | p2
+```
+
+```{r}
+food_data_crops_2 %>%
+  filter(item == "Maize corn") %>%
+  ggplot(aes(focus_year, yield, group = 1)) +
+  geom_point() +
+  geom_line(colour = "darkgreen") +
+  labs(x = "Year", y = "Amount in hg/ha", title = "Yield Per Year")
+```
+
+```{r}
+food_data_crops_maize2 <- food_data_crops_maize %>% filter(element != "Yield")
+ggplot(food_data_crops_maize2, aes(
+  x = focus_year, y = value,
+  fill = element
+)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_y_continuous(
+    breaks = seq(0, 4200000, by = 200000),
+    limits = c(0, 4200000)
+  ) +
+  theme(axis.text.x = element_text(angle = -90)) +
+  labs(x = "Year", y = "Amount", title = "MAIZE Production & Harvest") +
+  facet_wrap(~element)
+```
+
+```{r}
+p1 <- ggplot(food_data_crops_maize, aes(x = focus_year, y = value, group = element)) +
+  geom_line(aes(colour = element)) +
+  scale_y_continuous(
+    breaks = seq(0, 4200000, by = 200000),
+    limits = c(c(0, 4200000))
+  ) +
+  labs(x = "Year", y = "Amount", title = "MAIZE Production, Harvest & Yield")
+p1
+```
+
+
+### Although there was an increase in area harvested in 2016 as compared to 2015, the production level fell and so was the Yield. 2016 had the lowest yield across all the 6 years.
+### Area harvested declined further in 2017 and so did the production. The yield increased.
+### In 2018 there was a slight increase in area harvested and a sharp increase in production. 2018 had the highest level of production but the highest area harvested was in 2016. The Yield also inceased significantly.
+### In 2019 there wasn't significant difference increase in area harvested but the production fell significantly and so was the yield.
+### 2019 to 2020 there was minimal drop in area harvested but production levels rose and the yield too.
+### The 6 years had an average yield of 16392hg/ha which is significantly low in relation to area harvested and production.
+
+
+```{r}
+p2 <- ggplot(
+  food_data_crops_1 %>% filter(item == "Fresh Cassava"),
+  aes(x = focus_year, y = value, group = element)
+) +
+  geom_line(aes(colour = element)) +
+  scale_y_continuous(breaks = seq(0, 950000, by = 50000)) +
+  labs(x = "Year", y = "Amount", title = "Cassava Production, Harvest & Yield")
+p2
+```
+
+### Cassava seems to be doing better as there isn't a significant difference in area harvested but the production has been improving significantly.
+### 2016 to 2018 were very good years for cassava, as the production moved from 575,000 tonnes to 950,000 tonnes, while in the same period area harvested remained between 50,000ha and 75,000ha. Given that in this period the area harvested did not change as much while production peaked in 2018.
+
+```{r}
+p3 <- ggplot(
+  food_data_crops_1 %>% filter(item == "Potatoes"),
+  aes(x = focus_year, y = value, group = element)
+) +
+  geom_line(aes(colour = element)) +
+  scale_y_continuous(breaks = seq(0, 2000000, by = 100000)) +
+  labs(x = "Year", y = "Amount", title = "Potatoes Production, Harvest & Yield")
+p3
+```
+
+### Potatoes production had a sharp fall from 2015 to 2016 even though area harvested was almost constant.
+### The production rose again all the way to 2019 where the area harvested just increased by 50,000ha.
+
+### From 2015 to 2016 the 3 crops had a fall in production
